@@ -1,0 +1,51 @@
+.app-header {
+  height: var(--header-height);
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+}
+
+.app-header .logo {
+  font-size: 1.5rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-primary-dark);
+}
+
+.app-header .logo span {
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.welcome-text {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: 1rem;
+}
+
+.left-column {
+  flex: 6;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-column {
+  flex: 4;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  .welcome-text {
+    display: none;
+  }
+}
