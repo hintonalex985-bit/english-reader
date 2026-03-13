@@ -11,155 +11,107 @@ interface PdfViewerProps {
 }
 
 /**
- * Given a clicked text span, extract the sentence it belongs to.
- * 1. Groups ALL spans into visual lines by Y position.
- * 2. Merges consecutive lines into paragraphs when vertical gap is small.
- * 3. Within a paragraph, splits by large horizontal gaps (table columns).
- * 4. Finds sentence boundaries via sentence-ending punctuation.
+ * Extract the sentence on the CURRENT LINE only.
+ * Splitting rules:
+ *   1. Large horizontal gap between spans → break into segments
+ *   2. Chinese characters in span text → break at that boundary
+ *   3. Period (.) → sentence delimiter within a segment
+ * After splitting, selects the segment closest to the clicked span.
  */
-function extractSentenceFromContext(clickedSpan: HTMLElement): string {
+function extractSentenceFromLine(clickedSpan: HTMLElement): string {
   const parent = clickedSpan.parentElement;
   if (!parent) return clickedSpan.textContent || '';
 
   const allSpans = Array.from(parent.querySelectorAll('span'));
   if (allSpans.length === 0) return clickedSpan.textContent || '';
 
-  // --- Step 1: group all spans into visual lines by Y position ---
-  const LINE_TOLERANCE = 5;
-  const lineMap = new Map<number, HTMLElement[]>(); // roundedY -> spans
+  // Filter to same visual line (Y tolerance 5px)
+  const clickedTop = parseFloat(clickedSpan.style.top) || 0;
+  const sameLineSpans = allSpans
+    .filter(span => Math.abs((parseFloat(span.style.top) || 0) - clickedTop) < 5)
+    .sort((a, b) => (parseFloat(a.style.left) || 0) - (parseFloat(b.style.left) || 0));
 
-  for (const span of allSpans) {
-    const top = parseFloat(span.style.top) || 0;
-    // Find existing line key within tolerance
-    let matched = false;
-    for (const [key] of lineMap) {
-      if (Math.abs(top - key) < LINE_TOLERANCE) {
-        lineMap.get(key)!.push(span);
-        matched = true;
-        break;
+  // --- Step 1: split into segments by horizontal gap and Chinese text ---
+  const CHINESE_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+  const segments: HTMLElement[][] = [[]];
+
+  for (let i = 0; i < sameLineSpans.length; i++) {
+    const span = sameLineSpans[i];
+    const text = span.textContent || '';
+
+    // Check for Chinese characters → start new segment
+    if (CHINESE_RE.test(text)) {
+      if (segments[segments.length - 1].length > 0) {
+        segments.push([]); // new segment after this Chinese span
       }
-    }
-    if (!matched) {
-      lineMap.set(top, [span]);
-    }
-  }
-
-  // Sort each line's spans by X, and sort lines by Y
-  const sortedLines = Array.from(lineMap.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([y, spans]) => ({
-      y,
-      spans: spans.sort((a, b) => (parseFloat(a.style.left) || 0) - (parseFloat(b.style.left) || 0))
-    }));
-
-  // --- Step 2: merge consecutive lines into paragraphs ---
-  // Lines with small vertical gap (< 1.5× line height) belong to the same paragraph.
-  const paragraphs: { y: number; spans: HTMLElement[] }[][] = [];
-  let currentPara: { y: number; spans: HTMLElement[] }[] = [];
-
-  for (let i = 0; i < sortedLines.length; i++) {
-    const line = sortedLines[i];
-    if (i === 0) {
-      currentPara.push(line);
+      // Skip Chinese spans entirely (don't include in any segment)
+      segments.push([]);
       continue;
     }
-    const prevLine = sortedLines[i - 1];
-    const lineGap = line.y - prevLine.y;
-    const fontSize = parseFloat(prevLine.spans[0]?.style.fontSize || '12');
-    const LINE_HEIGHT_THRESHOLD = fontSize * 1.8;
 
-    if (lineGap > LINE_HEIGHT_THRESHOLD) {
-      // Big gap → new paragraph
-      paragraphs.push(currentPara);
-      currentPara = [line];
-    } else {
-      currentPara.push(line);
-    }
-  }
-  if (currentPara.length > 0) paragraphs.push(currentPara);
+    // Check horizontal gap from previous span
+    if (i > 0 && segments[segments.length - 1].length > 0) {
+      const prevSpan = sameLineSpans[i - 1];
+      const prevLeft = parseFloat(prevSpan.style.left) || 0;
+      const prevFontSize = parseFloat(prevSpan.style.fontSize) || 12;
+      const prevEstWidth = (prevSpan.textContent || '').length * prevFontSize * 0.55;
+      const prevEnd = prevLeft + prevEstWidth;
+      const curLeft = parseFloat(span.style.left) || 0;
+      const gap = curLeft - prevEnd;
 
-  // --- Step 3: find the paragraph containing the clicked span ---
-  let targetPara = paragraphs.find(para =>
-    para.some(line => line.spans.includes(clickedSpan))
-  );
-  if (!targetPara) return clickedSpan.textContent || '';
-
-  // Flatten paragraph lines into a single span list, applying horizontal gap splitting
-  // within each line to avoid merging table columns
-  const flatSpans: HTMLElement[] = [];
-  let clickedInFlat = false;
-
-  for (const line of targetPara) {
-    for (let i = 0; i < line.spans.length; i++) {
-      const span = line.spans[i];
-
-      // Check horizontal gap to split table-like columns
-      if (i > 0) {
-        const prevSpan = line.spans[i - 1];
-        const prevLeft = parseFloat(prevSpan.style.left) || 0;
-        const prevFontSize = parseFloat(prevSpan.style.fontSize) || 12;
-        const prevEstWidth = (prevSpan.textContent || '').length * prevFontSize * 0.6;
-        const prevEnd = prevLeft + prevEstWidth;
-        const curLeft = parseFloat(span.style.left) || 0;
-        const gap = curLeft - prevEnd;
-
-        if (gap > prevFontSize * 3) {
-          // Big horizontal gap: if clicked span is already found, stop.
-          // If not found yet, reset and start fresh.
-          if (clickedInFlat) break;
-          flatSpans.length = 0; // clear
-        }
+      if (gap > prevFontSize * 2.5) {
+        // Big gap → new segment
+        segments.push([]);
       }
-
-      flatSpans.push(span);
-      if (span === clickedSpan) clickedInFlat = true;
     }
 
-    // If we already found and passed the clicked span's column block, we can
-    // continue to next lines (they may still be part of the same sentence)
+    segments[segments.length - 1].push(span);
   }
 
-  // If somehow clicked span wasn't found, fallback
-  if (!clickedInFlat) return clickedSpan.textContent || '';
+  // --- Step 2: find the segment containing the clicked span ---
+  const targetSegment = segments.find(seg => seg.includes(clickedSpan));
+  if (!targetSegment || targetSegment.length === 0) {
+    return clickedSpan.textContent || '';
+  }
 
-  // --- Step 4: build text and find sentence boundaries ---
-  let blockText = '';
+  // --- Step 3: build text and apply period-based sentence splitting ---
+  let segText = '';
   let clickedIdx = 0;
   let foundClicked = false;
 
-  for (let i = 0; i < flatSpans.length; i++) {
-    const span = flatSpans[i];
+  for (let i = 0; i < targetSegment.length; i++) {
+    const span = targetSegment[i];
     const text = span.textContent || '';
 
     if (i > 0) {
-      const prevText = flatSpans[i - 1].textContent || '';
+      const prevText = targetSegment[i - 1].textContent || '';
       if (prevText.length > 0 && !/\s$/.test(prevText) && !/^\s/.test(text)) {
-        blockText += ' ';
+        segText += ' ';
         if (!foundClicked) clickedIdx++;
       }
     }
 
     if (span === clickedSpan) foundClicked = true;
     if (!foundClicked) clickedIdx += text.length;
-    blockText += text;
+    segText += text;
   }
 
-  // Only split on true sentence-ending punctuation
-  const SENTENCE_END = /[.!?。！？]/;
-  const clickedText = clickedSpan.textContent || '';
+  if (!foundClicked) return clickedSpan.textContent || '';
 
+  // Split by period
+  const clickedText = clickedSpan.textContent || '';
   let sentenceStart = clickedIdx;
-  while (sentenceStart > 0 && !SENTENCE_END.test(blockText[sentenceStart - 1])) {
+  while (sentenceStart > 0 && segText[sentenceStart - 1] !== '.') {
     sentenceStart--;
   }
 
   let sentenceEnd = clickedIdx + clickedText.length;
-  while (sentenceEnd < blockText.length && !SENTENCE_END.test(blockText[sentenceEnd])) {
+  while (sentenceEnd < segText.length && segText[sentenceEnd] !== '.') {
     sentenceEnd++;
   }
-  if (sentenceEnd < blockText.length) sentenceEnd++;
+  if (sentenceEnd < segText.length) sentenceEnd++;
 
-  return blockText.substring(sentenceStart, sentenceEnd).trim();
+  return segText.substring(sentenceStart, sentenceEnd).trim();
 }
 
 /**
@@ -329,18 +281,26 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
             const tx = textItem.transform;
             // PDF coordinate system is bottom-up. transform = [scaleX, skewX, skewY, scaleY, translateX, translateY]
             const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]) * scale;
-            const left = tx[4] * scale;
-            const top = viewport.height - tx[5] * scale;
+            const left = tx[4] * scale - fontSize * 0.5;
+            // Use textItem.height for more accurate positioning
+            const itemHeight = (textItem.height || fontSize / scale) * scale;
+            // Shift down to center-align with rendered canvas text
+            const top = viewport.height - tx[5] * scale - itemHeight + fontSize * 0.5;
 
             const span = document.createElement('span');
             span.textContent = textItem.str;
             span.style.position = 'absolute';
             span.style.left = `${left}px`;
-            span.style.top = `${top - fontSize}px`;
+            span.style.top = `${top}px`;
             span.style.fontSize = `${fontSize}px`;
             span.style.fontFamily = 'sans-serif';
-            span.style.lineHeight = '1';
+            span.style.lineHeight = '1.2';
             span.style.whiteSpace = 'pre';
+            // Use actual width from PDF.js for better alignment
+            if (textItem.width) {
+              span.style.width = `${textItem.width * scale}px`;
+              span.style.display = 'inline-block';
+            }
             span.dataset.text = textItem.str;
 
             textLayerDiv.appendChild(span);
@@ -366,7 +326,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
     if (!clickedText.trim()) return;
 
     // Extract the full sentence from context
-    const sentence = extractSentenceFromContext(target);
+    const sentence = extractSentenceFromLine(target);
 
     // Highlight the clicked span
     const container = containerRef.current;
