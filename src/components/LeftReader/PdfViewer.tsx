@@ -199,10 +199,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
           setPdfDoc(doc);
           setTotalPages(doc.numPages);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('PDF Load Error:', err);
         if (!cancelled) {
-          setError('PDF 加载失败，请检查文件是否损坏。');
+          const detail = err?.message || String(err);
+          setError(`PDF 加载失败：${detail}`);
         }
       } finally {
         if (!cancelled) setLoading(false);
