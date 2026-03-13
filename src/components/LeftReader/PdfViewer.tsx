@@ -230,91 +230,134 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
     }
   }, []);
 
-  // Render all pages
+  // Create page placeholders and lazy-render with IntersectionObserver
   useEffect(() => {
     if (!pdfDoc || !containerRef.current) return;
 
     const container = containerRef.current;
+    container.innerHTML = ''; // Clear previous
+    renderedPages.current.clear();
 
-    async function renderPages() {
-      for (let pageNum = 1; pageNum <= pdfDoc!.numPages; pageNum++) {
-        if (renderedPages.current.has(pageNum)) continue;
-        renderedPages.current.add(pageNum);
+    const scale = 1.5;
 
-        try {
-          const page = await pdfDoc!.getPage(pageNum);
-          const scale = 1.5;
-          const viewport = page.getViewport({ scale });
+    // Render a single page into its placeholder
+    async function renderPage(pageNum: number, wrapper: HTMLDivElement) {
+      if (renderedPages.current.has(pageNum)) return;
+      renderedPages.current.add(pageNum);
 
-          // Create wrapper for this page
-          const pageWrapper = document.createElement('div');
-          pageWrapper.classList.add('pdf-page-wrapper');
-          pageWrapper.style.width = `${viewport.width}px`;
-          pageWrapper.style.height = `${viewport.height}px`;
-          pageWrapper.style.position = 'relative';
-          pageWrapper.setAttribute('data-page', String(pageNum));
+      try {
+        const page = await pdfDoc!.getPage(pageNum);
+        const viewport = page.getViewport({ scale });
 
-          // Create canvas
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          canvas.style.display = 'block';
+        // Remove the loading label
+        const label = wrapper.querySelector('.page-loading-label');
+        if (label) label.remove();
 
-          const ctx = canvas.getContext('2d')!;
-          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+        // Resize wrapper to actual page dimensions
+        wrapper.style.width = `${viewport.width}px`;
+        wrapper.style.height = `${viewport.height}px`;
 
-          pageWrapper.appendChild(canvas);
+        // Create canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.display = 'block';
 
-          // Create text layer
-          const textLayerDiv = document.createElement('div');
-          textLayerDiv.classList.add('pdf-text-layer');
-          textLayerDiv.style.width = `${viewport.width}px`;
-          textLayerDiv.style.height = `${viewport.height}px`;
+        const ctx = canvas.getContext('2d')!;
+        await page.render({ canvasContext: ctx, viewport, canvas }).promise;
 
-          const textContent = await page.getTextContent();
+        wrapper.appendChild(canvas);
 
-          // Render text items as absolutely positioned spans
-          for (const item of textContent.items) {
-            if (!('str' in item) || !(item as any).str) continue;
-            const textItem = item as any;
+        // Create text layer
+        const textLayerDiv = document.createElement('div');
+        textLayerDiv.classList.add('pdf-text-layer');
+        textLayerDiv.style.width = `${viewport.width}px`;
+        textLayerDiv.style.height = `${viewport.height}px`;
 
-            const tx = textItem.transform;
-            // PDF coordinate system is bottom-up. transform = [scaleX, skewX, skewY, scaleY, translateX, translateY]
-            const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]) * scale;
-            const left = tx[4] * scale - fontSize * 0.5;
-            // Use textItem.height for more accurate positioning
-            const itemHeight = (textItem.height || fontSize / scale) * scale;
-            // Shift down to center-align with rendered canvas text
-            const top = viewport.height - tx[5] * scale - itemHeight + fontSize * 0.5;
+        const textContent = await page.getTextContent();
 
-            const span = document.createElement('span');
-            span.textContent = textItem.str;
-            span.style.position = 'absolute';
-            span.style.left = `${left}px`;
-            span.style.top = `${top}px`;
-            span.style.fontSize = `${fontSize}px`;
-            span.style.fontFamily = 'sans-serif';
-            span.style.lineHeight = '1.2';
-            span.style.whiteSpace = 'pre';
-            // Use actual width from PDF.js for better alignment
-            if (textItem.width) {
-              span.style.width = `${textItem.width * scale}px`;
-              span.style.display = 'inline-block';
-            }
-            span.dataset.text = textItem.str;
+        for (const item of textContent.items) {
+          if (!('str' in item) || !(item as any).str) continue;
+          const textItem = item as any;
 
-            textLayerDiv.appendChild(span);
+          const tx = textItem.transform;
+          const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]) * scale;
+          const left = tx[4] * scale - fontSize * 0.5;
+          const itemHeight = (textItem.height || fontSize / scale) * scale;
+          const top = viewport.height - tx[5] * scale - itemHeight + fontSize * 0.5;
+
+          const span = document.createElement('span');
+          span.textContent = textItem.str;
+          span.style.position = 'absolute';
+          span.style.left = `${left}px`;
+          span.style.top = `${top}px`;
+          span.style.fontSize = `${fontSize}px`;
+          span.style.fontFamily = 'sans-serif';
+          span.style.lineHeight = '1.2';
+          span.style.whiteSpace = 'pre';
+          if (textItem.width) {
+            span.style.width = `${textItem.width * scale}px`;
+            span.style.display = 'inline-block';
           }
+          span.dataset.text = textItem.str;
 
-          pageWrapper.appendChild(textLayerDiv);
-          container.appendChild(pageWrapper);
-        } catch (err) {
-          console.error(`Error rendering page ${pageNum}:`, err);
+          textLayerDiv.appendChild(span);
         }
+
+        wrapper.appendChild(textLayerDiv);
+      } catch (err) {
+        console.error(`Error rendering page ${pageNum}:`, err);
       }
     }
 
-    renderPages();
+    // Step 1: Create lightweight placeholder for each page
+    const wrappers: HTMLDivElement[] = [];
+    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+      const wrapper = document.createElement('div');
+      wrapper.classList.add('pdf-page-wrapper');
+      wrapper.style.width = '600px'; // default width, will be resized
+      wrapper.style.height = '800px';
+      wrapper.style.position = 'relative';
+      wrapper.setAttribute('data-page', String(pageNum));
+
+      // Loading label
+      const label = document.createElement('div');
+      label.className = 'page-loading-label';
+      label.textContent = `第 ${pageNum} 页 - 加载中...`;
+      wrapper.appendChild(label);
+
+      container.appendChild(wrapper);
+      wrappers.push(wrapper);
+    }
+
+    // Step 2: Render first 2 pages immediately
+    const immediateRender = Math.min(2, pdfDoc.numPages);
+    for (let i = 0; i < immediateRender; i++) {
+      renderPage(i + 1, wrappers[i]);
+    }
+
+    // Step 3: Use IntersectionObserver to lazy-render remaining pages
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const pageNum = Number((entry.target as HTMLElement).getAttribute('data-page'));
+            if (pageNum && !renderedPages.current.has(pageNum)) {
+              renderPage(pageNum, entry.target as HTMLDivElement);
+            }
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { root: container, rootMargin: '200px' } // Pre-load 200px before visible
+    );
+
+    // Observe pages 3+
+    for (let i = immediateRender; i < wrappers.length; i++) {
+      observer.observe(wrappers[i]);
+    }
+
+    return () => observer.disconnect();
   }, [pdfDoc]);
 
   // Single-click: read the whole sentence

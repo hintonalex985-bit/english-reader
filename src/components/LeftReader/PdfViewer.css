@@ -129,6 +129,16 @@
   display: block;
 }
 
+.page-loading-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.1rem;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
 /* Text Layer: invisible overlay that makes text clickable */
 .pdf-text-layer {
   position: absolute;
