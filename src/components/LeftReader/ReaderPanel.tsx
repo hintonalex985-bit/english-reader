@@ -37,12 +37,18 @@ export const ReaderPanel: React.FC<ReaderPanelProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.type === 'application/pdf') {
+    // Check by MIME type AND file extension for cross-browser compatibility.
+    // Some browsers (mobile, Safari, domestic browsers) may not report correct MIME types.
+    const fileName = file.name.toLowerCase();
+    const isPdf = file.type === 'application/pdf' || fileName.endsWith('.pdf');
+    const isTxt = file.type === 'text/plain' || fileName.endsWith('.txt');
+
+    if (isPdf) {
       setPdfFile(file);
       setTextContent(null);
       // Cache the PDF for next refresh
       cachePdfFile(file);
-    } else if (file.type === 'text/plain') {
+    } else if (isTxt) {
       setIsProcessing(true);
       try {
         const text = await file.text();
@@ -170,7 +176,7 @@ export const ReaderPanel: React.FC<ReaderPanelProps> = ({
             type="file"
             ref={fileInputRef}
             onChange={handleFileUpload}
-            accept=".txt,.pdf,application/pdf,text/plain"
+            accept=".pdf,.txt"
             style={{ display: 'none' }}
           />
         </div>
