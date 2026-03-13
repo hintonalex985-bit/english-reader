@@ -109,8 +109,8 @@
 
 /* Drag selection box */
 .drag-selection-box {
-  background: rgba(79, 134, 247, 0.15);
-  border: 2px dashed rgba(79, 134, 247, 0.6);
+  background: rgba(239, 68, 68, 0.12);
+  border: 2px dashed rgba(239, 68, 68, 0.8);
   border-radius: 4px;
 }
 

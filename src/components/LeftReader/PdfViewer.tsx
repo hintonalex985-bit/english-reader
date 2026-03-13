@@ -351,13 +351,15 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
   } | null>(null);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only start drag on left mouse button and not on a span (let click handle spans)
     if (e.button !== 0) return;
     const container = containerRef.current;
     if (!container) return;
 
     const rect = container.getBoundingClientRect();
-    dragStart.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    dragStart.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top + container.scrollTop
+    };
     setIsDragging(false);
     setSelectionBox(null);
   }, []);
@@ -369,12 +371,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
 
     const rect = container.getBoundingClientRect();
     const curX = e.clientX - rect.left;
-    const curY = e.clientY - rect.top;
+    const curY = e.clientY - rect.top + container.scrollTop;
     const dx = curX - dragStart.current.x;
     const dy = curY - dragStart.current.y;
 
     // Only activate drag if moved more than 5px (avoid triggering on simple clicks)
     if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      e.preventDefault(); // Prevent browser text selection during drag
       setIsDragging(true);
       setSelectionBox({
         left: Math.min(dragStart.current.x, curX),
@@ -396,9 +399,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
 
       allSpans.forEach(span => {
         const spanRect = span.getBoundingClientRect();
-        // Convert span rect to container-relative coordinates
+        // Convert span rect to container-relative coordinates (including scroll)
         const spanLeft = spanRect.left - containerRect.left;
-        const spanTop = spanRect.top - containerRect.top;
+        const spanTop = spanRect.top - containerRect.top + container.scrollTop;
         const spanRight = spanLeft + spanRect.width;
         const spanBottom = spanTop + spanRect.height;
 
