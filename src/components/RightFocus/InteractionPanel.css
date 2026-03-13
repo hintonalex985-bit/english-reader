@@ -285,3 +285,67 @@
   letter-spacing: 0.05em;
   animation: popIn 0.3s ease;
 }
+
+/* Tablet */
+@media (max-width: 1024px) {
+  .interaction-panel {
+    padding: 1.5rem;
+  }
+  .focus-area {
+    padding: 1.5rem;
+  }
+  .focus-text.large {
+    font-size: 3rem;
+  }
+  .focus-text.medium {
+    font-size: 1.5rem;
+  }
+  .main-play {
+    width: 64px;
+    height: 64px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .interaction-panel {
+    padding: 1rem;
+  }
+  .focus-area {
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .focus-text.large {
+    font-size: 2.5rem;
+  }
+  .focus-text.medium {
+    font-size: 1.2rem;
+  }
+  .phonetic-display {
+    font-size: 1.1rem;
+  }
+  .main-play {
+    width: 56px;
+    height: 56px;
+  }
+  .control-btn.toggle {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+  }
+  .controls-dashboard {
+    padding: 1rem;
+    gap: 1rem;
+  }
+  .interaction-hint {
+    font-size: 0.75rem;
+  }
+  .edit-textarea {
+    font-size: 1.1rem;
+  }
+  .empty-state h3 {
+    font-size: 1.2rem;
+  }
+  .hint-list {
+    font-size: 0.85rem;
+  }
+}

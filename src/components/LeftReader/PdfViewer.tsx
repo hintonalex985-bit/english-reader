@@ -568,6 +568,43 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={(e) => {
+          const touch = e.touches[0];
+          const container = containerRef.current;
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          dragStart.current = {
+            x: touch.clientX - rect.left,
+            y: touch.clientY - rect.top + container.scrollTop
+          };
+          setIsDragging(false);
+          setSelectionBox(null);
+        }}
+        onTouchMove={(e) => {
+          if (!dragStart.current) return;
+          const container = containerRef.current;
+          if (!container) return;
+          const touch = e.touches[0];
+          const rect = container.getBoundingClientRect();
+          const curX = touch.clientX - rect.left;
+          const curY = touch.clientY - rect.top + container.scrollTop;
+          const dx = curX - dragStart.current.x;
+          const dy = curY - dragStart.current.y;
+
+          if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+            e.preventDefault(); // Prevent scrolling while drag-selecting
+            setIsDragging(true);
+            setSelectionBox({
+              left: Math.min(dragStart.current.x, curX),
+              top: Math.min(dragStart.current.y, curY),
+              width: Math.abs(dx),
+              height: Math.abs(dy)
+            });
+          }
+        }}
+        onTouchEnd={() => {
+          handleMouseUp(); // Reuse the same logic
+        }}
         style={{ position: 'relative' }}
       >
         {/* Selection box overlay */}
