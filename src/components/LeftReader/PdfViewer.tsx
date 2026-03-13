@@ -343,6 +343,98 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
     }
   }, [onItemClick]);
 
+  // === Drag-select: box selection to pick text ===
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const [selectionBox, setSelectionBox] = useState<{
+    left: number; top: number; width: number; height: number
+  } | null>(null);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Only start drag on left mouse button and not on a span (let click handle spans)
+    if (e.button !== 0) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    dragStart.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    setIsDragging(false);
+    setSelectionBox(null);
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragStart.current) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const curX = e.clientX - rect.left;
+    const curY = e.clientY - rect.top;
+    const dx = curX - dragStart.current.x;
+    const dy = curY - dragStart.current.y;
+
+    // Only activate drag if moved more than 5px (avoid triggering on simple clicks)
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      setIsDragging(true);
+      setSelectionBox({
+        left: Math.min(dragStart.current.x, curX),
+        top: Math.min(dragStart.current.y, curY),
+        width: Math.abs(dx),
+        height: Math.abs(dy)
+      });
+    }
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    if (isDragging && selectionBox && containerRef.current) {
+      const container = containerRef.current;
+      const containerRect = container.getBoundingClientRect();
+
+      // Find all spans within the selection box
+      const allSpans = container.querySelectorAll('.pdf-text-layer span');
+      const selectedTexts: string[] = [];
+
+      allSpans.forEach(span => {
+        const spanRect = span.getBoundingClientRect();
+        // Convert span rect to container-relative coordinates
+        const spanLeft = spanRect.left - containerRect.left;
+        const spanTop = spanRect.top - containerRect.top;
+        const spanRight = spanLeft + spanRect.width;
+        const spanBottom = spanTop + spanRect.height;
+
+        // Check overlap with selection box
+        const boxRight = selectionBox.left + selectionBox.width;
+        const boxBottom = selectionBox.top + selectionBox.height;
+
+        if (
+          spanRight > selectionBox.left &&
+          spanLeft < boxRight &&
+          spanBottom > selectionBox.top &&
+          spanTop < boxBottom
+        ) {
+          const text = (span as HTMLElement).dataset.text || span.textContent || '';
+          if (text.trim()) {
+            selectedTexts.push(text.trim());
+            (span as HTMLElement).classList.add('active-text');
+          }
+        }
+      });
+
+      if (selectedTexts.length > 0) {
+        const combined = selectedTexts.join(' ');
+        onItemClick({
+          type: 'sentence',
+          text: combined,
+          id: `drag-${Date.now()}`
+        });
+      }
+    }
+
+    dragStart.current = null;
+    setIsDragging(false);
+    setSelectionBox(null);
+  }, [isDragging, selectionBox, onItemClick]);
+
   if (loading) {
     return (
       <div className="pdf-loading">
@@ -363,14 +455,35 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
   return (
     <div className="pdf-viewer-container">
       <div className="pdf-hint">
-        💡 <strong>单击</strong>朗读整个句子 | <strong>双击</strong>朗读单个单词
+        💡 <strong>单击</strong>朗读句子 | <strong>双击</strong>朗读单词 | <strong>拖动框选</strong>朗读选中内容
       </div>
       <div 
         className="pdf-pages-container"
         ref={containerRef}
         onClick={handleTextClick}
         onDoubleClick={handleDoubleClick}
-      />
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{ position: 'relative' }}
+      >
+        {/* Selection box overlay */}
+        {isDragging && selectionBox && (
+          <div
+            className="drag-selection-box"
+            style={{
+              position: 'absolute',
+              left: selectionBox.left,
+              top: selectionBox.top,
+              width: selectionBox.width,
+              height: selectionBox.height,
+              pointerEvents: 'none',
+              zIndex: 999
+            }}
+          />
+        )}
+      </div>
       {totalPages > 0 && (
         <div className="pdf-page-count">共 {totalPages} 页</div>
       )}

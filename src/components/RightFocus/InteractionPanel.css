@@ -274,3 +274,14 @@
 .secondary-controls {
   flex-wrap: wrap;
 }
+
+/* Phonetic transcription display */
+.phonetic-display {
+  margin-top: 0.75rem;
+  font-size: 1.5rem;
+  color: var(--color-primary);
+  font-weight: 600;
+  font-style: italic;
+  letter-spacing: 0.05em;
+  animation: popIn 0.3s ease;
+}

@@ -106,3 +106,16 @@
   font-weight: 600;
   flex-shrink: 0;
 }
+
+/* Drag selection box */
+.drag-selection-box {
+  background: rgba(79, 134, 247, 0.15);
+  border: 2px dashed rgba(79, 134, 247, 0.6);
+  border-radius: 4px;
+}
+
+/* Disable user-select in the PDF container during drag */
+.pdf-pages-container {
+  user-select: none;
+  -webkit-user-select: none;
+}

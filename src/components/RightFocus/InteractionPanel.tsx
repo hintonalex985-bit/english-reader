@@ -7,6 +7,10 @@ interface InteractionPanelProps {
   activeItem: ActiveItemInfo | null;
 }
 
+// Default speed: 0.8x, slow speed: 0.5x
+const NORMAL_RATE = 0.8;
+const SLOW_RATE = 0.5;
+
 /**
  * Speak a given text using Web Speech API.
  */
@@ -22,7 +26,7 @@ function speakText(
   const voices = synth.getVoices();
   const engVoice = voices.find(v => v.lang.startsWith('en-US') || v.lang.startsWith('en-GB'));
   if (engVoice) utterance.voice = engVoice;
-  utterance.rate = slow ? 0.6 : 1.0;
+  utterance.rate = slow ? SLOW_RATE : NORMAL_RATE;
   utterance.pitch = 1.1;
   utterance.onstart = onStart;
   utterance.onend = onEnd;
@@ -30,11 +34,37 @@ function speakText(
   synth.speak(utterance);
 }
 
+/**
+ * Fetch phonetic transcription from free dictionary API.
+ */
+async function fetchPhonetic(word: string): Promise<string | null> {
+  try {
+    const clean = word.replace(/[^a-zA-Z'-]/g, '').toLowerCase();
+    if (!clean) return null;
+    const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${clean}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    // Try to get phonetic from the first entry
+    if (data?.[0]?.phonetic) return data[0].phonetic;
+    // Or from phonetics array
+    const phonetics = data?.[0]?.phonetics;
+    if (Array.isArray(phonetics)) {
+      for (const p of phonetics) {
+        if (p.text) return p.text;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export const InteractionPanel: React.FC<InteractionPanelProps> = ({ activeItem }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSlowMode, setIsSlowMode] = useState(false);
   const [editableText, setEditableText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [phonetic, setPhonetic] = useState<string | null>(null);
   const synthRef = useRef(window.speechSynthesis);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -43,6 +73,7 @@ export const InteractionPanel: React.FC<InteractionPanelProps> = ({ activeItem }
     if (activeItem) {
       setEditableText(activeItem.text);
       setIsEditing(false);
+      setPhonetic(null);
       // Auto-play the new text
       speakText(
         synthRef.current,
@@ -51,10 +82,15 @@ export const InteractionPanel: React.FC<InteractionPanelProps> = ({ activeItem }
         () => setIsPlaying(true),
         () => setIsPlaying(false)
       );
+      // Fetch phonetic if it's a single word
+      if (activeItem.type === 'word') {
+        fetchPhonetic(activeItem.text).then(p => setPhonetic(p));
+      }
     } else {
       synthRef.current.cancel();
       setIsPlaying(false);
       setEditableText('');
+      setPhonetic(null);
     }
     return () => { synthRef.current.cancel(); };
   }, [activeItem]);
@@ -80,16 +116,14 @@ export const InteractionPanel: React.FC<InteractionPanelProps> = ({ activeItem }
     }
   };
 
-  // Double-click on a word in the rendered text to speak just that word
+  // Double-click on a word in the rendered text to speak just that word + show phonetic
   const handleWordDoubleClick = useCallback(() => {
     const selection = window.getSelection();
-    if (!selection || selection.toString().trim() === '') {
-      // Try to detect word from click position using the browser's selection
-      // The browser auto-selects a word on double-click
-      return;
-    }
+    if (!selection || selection.toString().trim() === '') return;
+
     const word = selection.toString().trim();
     if (word && /[a-zA-Z]/.test(word)) {
+      // Speak the word
       speakText(
         synthRef.current,
         word,
@@ -97,6 +131,9 @@ export const InteractionPanel: React.FC<InteractionPanelProps> = ({ activeItem }
         () => setIsPlaying(true),
         () => setIsPlaying(false)
       );
+      // Fetch and display phonetic for this word
+      setPhonetic(null);
+      fetchPhonetic(word).then(p => setPhonetic(p));
     }
   }, [isSlowMode]);
 
@@ -120,6 +157,7 @@ export const InteractionPanel: React.FC<InteractionPanelProps> = ({ activeItem }
         <div className="hint-list">
           <span>📖 单击 → 朗读句子</span>
           <span>🔤 双击 → 朗读单词</span>
+          <span>✋ 拖动框选 → 朗读选中内容</span>
         </div>
       </div>
     );
@@ -164,12 +202,19 @@ export const InteractionPanel: React.FC<InteractionPanelProps> = ({ activeItem }
               {editableText || activeItem.text}
             </div>
           )}
+
+          {/* Phonetic transcription display */}
+          {phonetic && (
+            <div className="phonetic-display">
+              {phonetic}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Interaction hint */}
       <div className="interaction-hint">
-        ✏️ 点击编辑按钮可修改文本 | 双击单词可单独发音
+        ✏️ 点击编辑按钮可修改文本 | 双击单词可单独发音并显示音标
       </div>
 
       {/* Control Dashboard */}
