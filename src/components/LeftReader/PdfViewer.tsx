@@ -10,6 +10,25 @@ interface PdfViewerProps {
   onItemClick: (item: ActiveItemInfo) => void;
 }
 
+// Helper: detect and remove repeated text (PDF duplicate text layers)
+function deduplicateRepeatedText(text: string): string {
+  const words = text.split(/\s+/).filter(w => w.length > 0);
+  const n = words.length;
+  if (n < 2) return text;
+
+  // Try all possible split points from 1/3 to 2/3 of the array
+  const start = Math.max(1, Math.floor(n / 3));
+  const end = Math.min(n - 1, Math.ceil((n * 2) / 3));
+  for (let splitAt = start; splitAt <= end; splitAt++) {
+    const firstPart = words.slice(0, splitAt).join(' ');
+    const secondPart = words.slice(splitAt).join(' ');
+    if (firstPart === secondPart) {
+      return firstPart;
+    }
+  }
+  return text;
+}
+
 /**
  * Extract the sentence on the CURRENT LINE only.
  * Splitting rules:
@@ -27,9 +46,19 @@ function extractSentenceFromLine(clickedSpan: HTMLElement): string {
 
   // Filter to same visual line (Y tolerance 5px)
   const clickedTop = parseFloat(clickedSpan.style.top) || 0;
-  const sameLineSpans = allSpans
+  const sameLineRaw = allSpans
     .filter(span => Math.abs((parseFloat(span.style.top) || 0) - clickedTop) < 5)
     .sort((a, b) => (parseFloat(a.style.left) || 0) - (parseFloat(b.style.left) || 0));
+
+  // Deduplicate overlapping spans (PDF often has duplicate text layers)
+  const seenKeys = new Set<string>();
+  const sameLineSpans = sameLineRaw.filter(span => {
+    const left = Math.round((parseFloat(span.style.left) || 0) / 10);
+    const key = `${left}_${span.textContent || ''}`;
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
 
   // --- Step 1: split into segments by horizontal gap and Chinese text ---
   const CHINESE_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
@@ -54,12 +83,13 @@ function extractSentenceFromLine(clickedSpan: HTMLElement): string {
       const prevSpan = sameLineSpans[i - 1];
       const prevLeft = parseFloat(prevSpan.style.left) || 0;
       const prevFontSize = parseFloat(prevSpan.style.fontSize) || 12;
-      const prevEstWidth = (prevSpan.textContent || '').length * prevFontSize * 0.55;
-      const prevEnd = prevLeft + prevEstWidth;
+      // Use actual width if set, otherwise estimate
+      const prevWidth = parseFloat(prevSpan.style.width) || (prevSpan.textContent || '').length * prevFontSize * 0.55;
+      const prevEnd = prevLeft + prevWidth;
       const curLeft = parseFloat(span.style.left) || 0;
       const gap = curLeft - prevEnd;
 
-      if (gap > prevFontSize * 2.5) {
+      if (gap > prevFontSize * 0.5) {
         // Big gap → new segment
         segments.push([]);
       }
@@ -111,8 +141,11 @@ function extractSentenceFromLine(clickedSpan: HTMLElement): string {
   }
   if (sentenceEnd < segText.length) sentenceEnd++;
 
-  return segText.substring(sentenceStart, sentenceEnd).trim();
+  const result = segText.substring(sentenceStart, sentenceEnd).trim();
+  return deduplicateRepeatedText(result);
 }
+
+
 
 /**
  * Extract the single word that was clicked from the span text.
@@ -276,6 +309,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
 
         const textContent = await page.getTextContent();
 
+        // Deduplicate text items at render time
+        const renderedTextKeys = new Set<string>();
+
         for (const item of textContent.items) {
           if (!('str' in item) || !(item as any).str) continue;
           const textItem = item as any;
@@ -285,6 +321,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
           const left = tx[4] * scale - fontSize * 0.5;
           const itemHeight = (textItem.height || fontSize / scale) * scale;
           const top = viewport.height - tx[5] * scale - itemHeight + fontSize * 0.5;
+
+          // Skip duplicate: same text at similar position (grid = fontSize)
+          const grid = Math.max(fontSize, 15);
+          const dedupKey = `${Math.round(left / grid)}_${Math.round(top / grid)}_${textItem.str}`;
+          if (renderedTextKeys.has(dedupKey)) continue;
+          renderedTextKeys.add(dedupKey);
 
           const span = document.createElement('span');
           span.textContent = textItem.str;
@@ -423,6 +465,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
     const container = containerRef.current;
     if (!container) return;
 
+    // Clear previous highlights
+    container.querySelectorAll('.pdf-text-layer span.active-text').forEach(el =>
+      el.classList.remove('active-text')
+    );
+
     const rect = container.getBoundingClientRect();
     dragStart.current = {
       x: e.clientX - rect.left,
@@ -465,34 +512,41 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
       const allSpans = container.querySelectorAll('.pdf-text-layer span');
       const selectedTexts: string[] = [];
 
+      // Track positions to deduplicate overlapping spans
+      const seen = new Set<string>();
+
       allSpans.forEach(span => {
         const spanRect = span.getBoundingClientRect();
-        // Convert span rect to container-relative coordinates (including scroll)
-        const spanLeft = spanRect.left - containerRect.left;
-        const spanTop = spanRect.top - containerRect.top + container.scrollTop;
-        const spanRight = spanLeft + spanRect.width;
-        const spanBottom = spanTop + spanRect.height;
+        // Use span's CENTER point for more precise selection
+        const spanCenterX = spanRect.left - containerRect.left + spanRect.width / 2;
+        const spanCenterY = spanRect.top - containerRect.top + container.scrollTop + spanRect.height / 2;
 
-        // Check overlap with selection box
+        // Check if span's center is inside the selection box
         const boxRight = selectionBox.left + selectionBox.width;
         const boxBottom = selectionBox.top + selectionBox.height;
 
         if (
-          spanRight > selectionBox.left &&
-          spanLeft < boxRight &&
-          spanBottom > selectionBox.top &&
-          spanTop < boxBottom
+          spanCenterX > selectionBox.left &&
+          spanCenterX < boxRight &&
+          spanCenterY > selectionBox.top &&
+          spanCenterY < boxBottom
         ) {
           const text = (span as HTMLElement).dataset.text || span.textContent || '';
           if (text.trim()) {
-            selectedTexts.push(text.trim());
+            // Deduplicate: skip if same text at roughly same position (5px tolerance)
+            const key = `${Math.round(spanCenterX / 5)}_${Math.round(spanCenterY / 5)}_${text.trim()}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              selectedTexts.push(text.trim());
+            }
             (span as HTMLElement).classList.add('active-text');
           }
         }
       });
 
       if (selectedTexts.length > 0) {
-        const combined = selectedTexts.join(' ');
+        const combined = deduplicateRepeatedText(selectedTexts.join(' '));
+
         onItemClick({
           type: 'sentence',
           text: combined,
