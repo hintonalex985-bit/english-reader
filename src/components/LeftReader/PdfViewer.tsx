@@ -175,6 +175,11 @@ function extractWordAtClick(text: string, offsetX: number, totalWidth: number): 
   return words[Math.min(idx, words.length - 1)];
 }
 
+interface TocItem {
+  title: string;
+  pageNum: number;
+}
+
 export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
@@ -182,6 +187,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const renderedPages = useRef<Set<number>>(new Set());
+  const [tocItems, setTocItems] = useState<TocItem[]>([]);
+  const [showToc, setShowToc] = useState(false);
 
   // Load PDF document
   useEffect(() => {
@@ -214,6 +221,63 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
     return () => { cancelled = true; };
   }, [file]);
 
+  // Load TOC / outline
+  useEffect(() => {
+    if (!pdfDoc) return;
+    async function loadOutline() {
+      try {
+        const outline = await pdfDoc!.getOutline();
+        if (outline && outline.length > 0) {
+          // Resolve outline destinations to page numbers
+          const items: TocItem[] = [];
+          for (const entry of outline) {
+            try {
+              let pageNum = 1;
+              if (entry.dest) {
+                const dest = typeof entry.dest === 'string'
+                  ? await pdfDoc!.getDestination(entry.dest)
+                  : entry.dest;
+                if (dest && dest[0]) {
+                  const pageIndex = await pdfDoc!.getPageIndex(dest[0]);
+                  pageNum = pageIndex + 1;
+                }
+              }
+              items.push({ title: entry.title, pageNum });
+            } catch {
+              items.push({ title: entry.title, pageNum: 1 });
+            }
+          }
+          setTocItems(items);
+        } else {
+          // No outline — generate a simple page list
+          const pages: TocItem[] = [];
+          for (let i = 1; i <= pdfDoc!.numPages; i++) {
+            pages.push({ title: `第 ${i} 页`, pageNum: i });
+          }
+          setTocItems(pages);
+        }
+      } catch {
+        // Fallback to page list
+        const pages: TocItem[] = [];
+        for (let i = 1; i <= pdfDoc!.numPages; i++) {
+          pages.push({ title: `第 ${i} 页`, pageNum: i });
+        }
+        setTocItems(pages);
+      }
+    }
+    loadOutline();
+  }, [pdfDoc]);
+
+  // Scroll to a specific page
+  const scrollToPage = useCallback((pageNum: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const pageEl = container.querySelector(`[data-page="${pageNum}"]`);
+    if (pageEl) {
+      pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
+
   // Render all pages
   useEffect(() => {
     if (!pdfDoc || !containerRef.current) return;
@@ -236,6 +300,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
           pageWrapper.style.width = `${viewport.width}px`;
           pageWrapper.style.height = `${viewport.height}px`;
           pageWrapper.style.position = 'relative';
+          pageWrapper.setAttribute('data-page', String(pageNum));
 
           // Create canvas
           const canvas = document.createElement('canvas');
@@ -457,9 +522,40 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ file, onItemClick }) => {
 
   return (
     <div className="pdf-viewer-container">
-      <div className="pdf-hint">
-        💡 <strong>单击</strong>朗读句子 | <strong>双击</strong>朗读单词 | <strong>拖动框选</strong>朗读选中内容
+      <div className="pdf-toolbar">
+        <div className="pdf-hint">
+          💡 <strong>单击</strong>朗读句子 | <strong>双击</strong>朗读单词 | <strong>拖动框选</strong>朗读选中内容
+        </div>
+        <button
+          className={`toc-toggle-btn ${showToc ? 'active' : ''}`}
+          onClick={() => setShowToc(!showToc)}
+        >
+          📑 目录
+        </button>
       </div>
+
+      {/* TOC Panel */}
+      {showToc && (
+        <div className="toc-panel">
+          <div className="toc-header">📑 目录导航</div>
+          <ul className="toc-list">
+            {tocItems.map((item, idx) => (
+              <li
+                key={idx}
+                className="toc-item"
+                onClick={() => {
+                  scrollToPage(item.pageNum);
+                  setShowToc(false);
+                }}
+              >
+                <span className="toc-title">{item.title}</span>
+                <span className="toc-page">p.{item.pageNum}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div 
         className="pdf-pages-container"
         ref={containerRef}
